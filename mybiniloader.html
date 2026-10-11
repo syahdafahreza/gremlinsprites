@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Bini Loader (Example)</title>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #ffffff;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: #222222;
+        }
+        canvas {
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+            display: block;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .loading-text {
+            margin-top: 16px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #444444;
+            letter-spacing: 0.5px;
+        }
+
+        .progress-container {
+            width: 160px;
+            height: 4px;
+            background-color: #f0f0f0;
+            border-radius: 99px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #222222;
+            border-radius: 99px;
+            transition: width 0.15s ease-out;
+        }
+
+        .visible {
+            opacity: 1 !important;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="spriteCanvas"></canvas>
+    <div class="loading-container" id="loadingContainer">
+        <div class="loading-text" id="loadingText">Menyiapkan data... 0%</div>
+        <div class="progress-container">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+    </div>
+
+    <script>
+        const SPRITE_DATABASE = {
+            WIDTH: 300,
+            HEIGHT: 300,
+            COLUMNS: 10,
+            SCALE: 0.8,
+            DEFAULT_FPS: 24,
+
+            FRAMES: {
+                RUNUP: 18, RUNDOWN: 18, RUNLEFT: 18, RUNRIGHT: 18,
+                UPLEFT: 18, UPRIGHT: 18, DOWNLEFT: 18, DOWNRIGHT: 18,
+                WALKDOWN: 30, WALKLEFT: 30, WALKRIGHT: 30, WALKUP: 30,
+                EMOTE1: 24, EMOTE2: 42, EMOTE3: 189, EMOTE4: 42,
+                IDLE: 340, OUTRO: 68, GRAB: 40, RUNIDLE: 41, HOVER: 30,
+                SLEEP: 255, INTRO: 50, PAT: 35, CLICK: 117, RELOAD: 70
+            }
+        };
+
+        const GITHUB_BASE_URL = 'https://syahdafahreza.github.io/gremlinsprites/agnes/emotes/';
+        const CURRENT_SPRITE_PATH = GITHUB_BASE_URL + 'emote3.png';
+        const FINISHED_SPRITE_PATH = GITHUB_BASE_URL + 'emote2.png';
+
+        function resolveConfig(filePath) {
+            const fileName = filePath.split('/').pop().split('?')[0].split('.')[0];
+            const key = fileName.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const matchedFrames = SPRITE_DATABASE.FRAMES[key] || 1;
+
+            return {
+                imgPath: filePath,
+                width: SPRITE_DATABASE.WIDTH,
+                height: SPRITE_DATABASE.HEIGHT,
+                columns: SPRITE_DATABASE.COLUMNS,
+                totalFrames: matchedFrames,
+                fps: SPRITE_DATABASE.DEFAULT_FPS,
+                scale: SPRITE_DATABASE.SCALE
+            };
+        }
+
+        const canvas = document.getElementById('spriteCanvas');
+        const ctx = canvas.getContext('2d');
+        const loadingContainer = document.getElementById('loadingContainer');
+        const loadingText = document.getElementById('loadingText');
+        const progressBar = document.getElementById('progressBar');
+
+        const preloadedAssets = {};
+
+        let activeConfig = resolveConfig(CURRENT_SPRITE_PATH);
+        let activeImg = null;
+        let activeFallbackCanvas = null;
+
+        let currentFrame = 0;
+        let lastFrameTime = performance.now();
+        let isFinishedState = false;
+
+        function applyCanvasDimensions(cfg) {
+            if (canvas.width !== cfg.width) canvas.width = cfg.width;
+            if (canvas.height !== cfg.height) canvas.height = cfg.height;
+            canvas.style.width = `${cfg.width * cfg.scale}px`;
+            canvas.style.height = `${cfg.height * cfg.scale}px`;
+        }
+
+        function createFallbackCanvas(cfg, isFinished = false) {
+            const fbCanvas = document.createElement('canvas');
+            fbCanvas.width = cfg.width * cfg.columns;
+            fbCanvas.height = cfg.height * Math.ceil(cfg.totalFrames / cfg.columns);
+            const fctx = fbCanvas.getContext('2d');
+
+            const color = isFinished ? '#3b82f6' : '#10b981';
+
+            for (let f = 0; f < cfg.totalFrames; f++) {
+                const col = f % cfg.columns;
+                const row = Math.floor(f / cfg.columns);
+                const x = col * cfg.width + cfg.width / 2;
+                const y = row * cfg.height + cfg.height / 2;
+                const bounce = Math.sin((f / 10) * Math.PI) * 10;
+
+                fctx.fillStyle = color;
+                fctx.beginPath();
+                fctx.arc(x, y + 10 + bounce, 28, 0, Math.PI * 2);
+                fctx.fill();
+
+                fctx.fillStyle = '#f43f5e';
+                fctx.beginPath();
+                fctx.arc(x, y - 20 + bounce, 36, 0, Math.PI * 2);
+                fctx.fill();
+
+                fctx.fillStyle = '#ffffff';
+                fctx.beginPath();
+                fctx.arc(x - 12, y - 22 + bounce, 6, 0, Math.PI * 2);
+                fctx.arc(x + 12, y - 22 + bounce, 6, 0, Math.PI * 2);
+                fctx.fill();
+
+                fctx.fillStyle = '#111827';
+                fctx.beginPath();
+                fctx.arc(x - 10, y - 22 + bounce, 3, 0, Math.PI * 2);
+                fctx.arc(x + 14, y - 22 + bounce, 3, 0, Math.PI * 2);
+                fctx.fill();
+            }
+            return fbCanvas;
+        }
+
+        function preloadSingleAsset(path, isFinished = false) {
+            return new Promise((resolve) => {
+                const cfg = resolveConfig(path);
+                
+                const sourcesToTry = [path];
+                if (path.endsWith('.png')) {
+                    sourcesToTry.push(path.replace(/\.png$/, '.jpg'));
+                }
+
+                let attemptIndex = 0;
+
+                function tryNextSource() {
+                    if (attemptIndex >= sourcesToTry.length) {
+                        const fb = createFallbackCanvas(cfg, isFinished);
+                        return resolve({ config: cfg, img: null, fallbackCanvas: fb });
+                    }
+
+                    const currentSrc = sourcesToTry[attemptIndex];
+                    attemptIndex++;
+
+                    const img = new Image();
+                    img.crossOrigin = "anonymous";
+
+                    img.onload = () => {
+                        resolve({
+                            config: cfg,
+                            img: img,
+                            fallbackCanvas: null
+                        });
+                    };
+
+                    img.onerror = () => {
+                        tryNextSource();
+                    };
+
+                    img.src = currentSrc;
+                }
+
+                tryNextSource();
+            });
+        }
+
+        async function preloadAllAssets() {
+            const results = await Promise.all([
+                preloadSingleAsset(CURRENT_SPRITE_PATH, false),
+                preloadSingleAsset(FINISHED_SPRITE_PATH, true)
+            ]);
+
+            preloadedAssets[CURRENT_SPRITE_PATH] = results[0];
+            preloadedAssets[FINISHED_SPRITE_PATH] = results[1];
+        }
+
+        function applyAsset(path, isNonLooping = false) {
+            const asset = preloadedAssets[path] || { config: resolveConfig(path) };
+            activeConfig = asset.config;
+            activeImg = asset.img;
+            activeFallbackCanvas = asset.fallbackCanvas;
+
+            applyCanvasDimensions(activeConfig);
+            currentFrame = 0;
+            isFinishedState = isNonLooping;
+            
+            lastFrameTime = performance.now();
+            renderFrame();
+        }
+
+        function renderFrame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const col = currentFrame % activeConfig.columns;
+            const row = Math.floor(currentFrame / activeConfig.columns);
+            const sx = col * activeConfig.width;
+            const sy = row * activeConfig.height;
+
+            if (activeImg && activeImg.complete && activeImg.naturalWidth !== 0) {
+                ctx.drawImage(
+                    activeImg,
+                    sx, sy, activeConfig.width, activeConfig.height,
+                    0, 0, activeConfig.width, activeConfig.height
+                );
+            } else if (activeFallbackCanvas) {
+                ctx.drawImage(
+                    activeFallbackCanvas,
+                    sx, sy, activeConfig.width, activeConfig.height,
+                    0, 0, activeConfig.width, activeConfig.height
+                );
+            }
+        }
+
+        function animate(now) {
+            requestAnimationFrame(animate);
+
+            const interval = 1000 / activeConfig.fps;
+            const delta = now - lastFrameTime;
+
+            if (delta >= interval) {
+                lastFrameTime = now - (delta % interval);
+                renderFrame();
+
+                if (isFinishedState) {
+                    if (currentFrame < activeConfig.totalFrames - 1) {
+                        currentFrame++;
+                    }
+                } else {
+                    currentFrame = (currentFrame + 1) % activeConfig.totalFrames;
+                }
+            }
+        }
+
+        function getLoadingMessage(percent) {
+            if (percent < 15) return "Menyiapkan data...";
+            if (percent < 35) return "Membaca sprite sheet...";
+            if (percent < 55) return "Menyinkronkan frame animasi...";
+            if (percent < 75) return "Memproses aset gambar...";
+            if (percent < 95) return "Menyelesaikan konfigurasi...";
+            if (percent < 100) return "Hampir siap...";
+            return "Selesai!";
+        }
+
+        let progress = 0;
+        function startLoadingProgress() {
+            const timer = setInterval(() => {
+                progress += Math.floor(Math.random() * 3) + 1;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(timer);
+                    loadingText.innerText = "Selesai! (100%)";
+                    applyAsset(FINISHED_SPRITE_PATH, true);
+                } else {
+                    const message = getLoadingMessage(progress);
+                    loadingText.innerText = `${message} ${progress}%`;
+                }
+                progressBar.style.width = `${progress}%`;
+            }, 250);
+        }
+
+        window.onload = async () => {
+            await preloadAllAssets();
+            applyAsset(CURRENT_SPRITE_PATH, false);
+
+            canvas.classList.add('visible');
+            loadingContainer.classList.add('visible');
+
+            requestAnimationFrame(animate);
+            startLoadingProgress();
+        };
+    </script>
+</body>
+</html>
